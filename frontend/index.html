@@ -1,0 +1,192 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>P2P SMS & File Transfer</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="/static/css/style.css">
+    <script src="https://unpkg.com/@phosphor-icons/web"></script>
+</head>
+<body>
+    <div class="background-mesh">
+        <div class="blob blob-1"></div>
+        <div class="blob blob-2"></div>
+    </div>
+
+    <div class="app-container glass-panel">
+        <header class="app-header">
+            <h1><i class="ph ph-paper-plane-tilt"></i> Jerry Drop</h1>
+            <div class="header-actions">
+                <button id="call-btn" class="icon-btn call-btn hidden" title="Start Audio Call">
+                    <i class="ph ph-phone"></i>
+                </button>
+                <div class="status-indicator" id="connection-status">
+                    <span class="dot disconnected"></span>
+                    <span class="status-text">Disconnected</span>
+                </div>
+            </div>
+        </header>
+        
+        <audio id="remote-audio" autoplay hidden></audio>
+
+        <main class="app-content">
+            <!-- 1. Login/Register Screen -->
+            <section id="login-screen" class="screen active">
+                <div class="host-setup">
+                    <h2 id="auth-title">Login to Jerry Drop</h2>
+                    <p id="auth-subtitle">Welcome back. Please login.</p>
+                    <input type="text" id="auth-username" placeholder="Username" autocomplete="off" class="text-input">
+                    <input type="password" id="auth-password" placeholder="Password" autocomplete="off" class="text-input">
+                    <button id="auth-submit-btn" class="btn primary-btn" style="width: 100%; margin-top: 12px;">Login</button>
+                    <p style="margin-top: 16px; cursor: pointer; color: var(--accent);" id="auth-toggle">Need an account? Register</p>
+                    <div id="login-error" class="error-msg"></div>
+                </div>
+            </section>
+
+            <!-- 2. Dashboard Screen (Host/Join) -->
+            <section id="dashboard-screen" class="screen">
+                <div style="display: flex; gap: 10px; margin-bottom: 20px;">
+                    <button id="tab-host" class="btn primary-btn" style="flex:1;">Host Space</button>
+                    <button id="tab-join" class="btn" style="flex:1; background: rgba(255,255,255,0.1); color: white;">Join Space</button>
+                </div>
+
+                <!-- Host Setup View -->
+                <div class="host-setup" id="host-setup">
+                    <h2>Host a Private Space</h2>
+                    <p>Host a space under your username. You can optionally set a PIN.</p>
+                    <input type="text" id="host-pin" maxlength="4" placeholder="Optional 4-Digit PIN" autocomplete="off" class="text-input">
+                    <button id="start-host-btn" class="btn primary-btn" style="width: 100%; margin-top: 12px;">Start Hosting</button>
+                </div>
+
+                <!-- Host Waiting View -->
+                <div class="host-info" id="host-waiting" style="display: none;">
+                    <h2>Hosting Space: <span id="my-space-name"></span></h2>
+                    <p>Share your username and PIN with friends.</p>
+                    <div class="qr-container">
+                        <img id="qr-code-img" src="" alt="Connect QR Code">
+                    </div>
+                    <div class="pin-display">
+                        <span class="pin-label">Room PIN</span>
+                        <div class="pin-code" id="display-pin">----</div>
+                    </div>
+                </div>
+
+                <!-- Client Join View -->
+                <div class="join-info" id="client-setup" style="display: none;">
+                    <h2>Join a Space</h2>
+                    <p>Enter the Host's username and their PIN to connect.</p>
+                    <input type="text" id="join-host-username" placeholder="Host's Username" autocomplete="off" class="text-input">
+                    <input type="text" id="join-pin" maxlength="4" placeholder="Host's PIN" autocomplete="off" class="text-input" style="margin-bottom: 12px;">
+                    <button id="connect-btn" class="btn primary-btn" style="width: 100%;">Connect</button>
+                    <div id="auth-error" class="error-msg"></div>
+                </div>
+            </section>
+
+            <!-- 2.5 Admin Dashboard Screen -->
+            <section id="admin-screen" class="screen">
+                <div class="admin-header" style="text-align: center; margin-bottom: 24px;">
+                    <h2>Admin Dashboard</h2>
+                    <p style="color: var(--text-muted); font-size: 0.9rem;">Live System Metrics</p>
+                </div>
+                
+                <div class="stats-grid">
+                    <div class="stat-card">
+                        <i class="ph ph-users" style="font-size: 2rem; color: var(--accent); margin-bottom: 8px;"></i>
+                        <h3 id="stat-total-users">0</h3>
+                        <p>Total Registered Users</p>
+                    </div>
+                    <div class="stat-card">
+                        <i class="ph ph-house" style="font-size: 2rem; color: var(--primary); margin-bottom: 8px;"></i>
+                        <h3 id="stat-active-hosts">0</h3>
+                        <p>Active Hosted Spaces</p>
+                    </div>
+                    <div class="stat-card">
+                        <i class="ph ph-plugs-connected" style="font-size: 2rem; color: var(--success); margin-bottom: 8px;"></i>
+                        <h3 id="stat-total-connections">0</h3>
+                        <p>Total Active Connections</p>
+                    </div>
+                </div>
+                
+                <div class="admin-grid" style="display: grid; grid-template-columns: 1fr 1fr; gap: 24px; margin-top: 24px;">
+                    <!-- User Details Table -->
+                    <div class="admin-panel" style="background: rgba(255,255,255,0.03); border: 1px solid var(--panel-border); border-radius: 12px; padding: 16px; max-height: 300px; overflow-y: auto;">
+                        <h3 style="margin-bottom: 12px; font-size: 1.1rem;"><i class="ph ph-address-book"></i> Registered Users</h3>
+                        <table style="width: 100%; border-collapse: collapse; font-size: 0.9rem; text-align: left;">
+                            <thead>
+                                <tr style="border-bottom: 1px solid var(--panel-border);">
+                                    <th style="padding: 8px 0; color: var(--text-muted);">ID</th>
+                                    <th style="padding: 8px 0; color: var(--text-muted);">Username</th>
+                                </tr>
+                            </thead>
+                            <tbody id="admin-users-tbody">
+                                <!-- Populated dynamically -->
+                            </tbody>
+                        </table>
+                    </div>
+
+                    <!-- Live Chat Intercept -->
+                    <div class="admin-panel" style="background: rgba(0,0,0,0.4); border: 1px solid var(--error); border-radius: 12px; padding: 16px; display: flex; flex-direction: column;">
+                        <h3 style="margin-bottom: 12px; font-size: 1.1rem; color: var(--error);"><i class="ph ph-warning-octagon"></i> Live Chat Intercept</h3>
+                        <div id="admin-chat-log" style="flex: 1; min-height: 200px; max-height: 250px; overflow-y: auto; font-family: monospace; font-size: 0.85rem; color: #0f0; background: #000; padding: 12px; border-radius: 8px;">
+                            <span style="color: #666;">> Listening for private messages...</span><br>
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="admin-hosts-list" style="margin-top: 24px; background: rgba(255,255,255,0.03); border: 1px solid var(--panel-border); border-radius: 12px; padding: 16px;">
+                    <h3 style="margin-bottom: 12px; font-size: 1.1rem;">Active Hosted Spaces</h3>
+                    <ul id="admin-hosts-ul" style="list-style: none; padding: 0; color: var(--text-muted); font-size: 0.9rem;">
+                        <li>No active spaces at the moment.</li>
+                    </ul>
+                </div>
+                
+                <button id="admin-enter-app-btn" class="btn" style="width: 100%; margin-top: 24px; background: rgba(255,255,255,0.1); border: 1px solid var(--panel-border); color: white;">
+                    Continue to Chat App <i class="ph ph-arrow-right"></i>
+                </button>
+            </section>
+
+            <!-- 3. Chat & File Transfer Screen -->
+            <section id="chat-screen" class="screen">
+                <div class="chat-container">
+                    <div class="messages-list" id="messages-list">
+                        <div class="message system">
+                            <p>Connected securely via WebRTC. Messages and files are end-to-end encrypted.</p>
+                        </div>
+                    </div>
+                    
+                    <div class="input-area">
+                        <button id="file-btn" class="icon-btn" title="Send File">
+                            <i class="ph ph-paperclip"></i>
+                        </button>
+                        <input type="file" id="file-input" style="display: none;">
+                        
+                        <input type="text" id="message-input" placeholder="Type a message..." autocomplete="off">
+                        
+                        <button id="send-btn" class="icon-btn primary-icon" title="Send">
+                            <i class="ph ph-paper-plane-right"></i>
+                        </button>
+                    </div>
+                </div>
+            </section>
+        </main>
+        
+        <!-- Incoming Call Modal -->
+        <div id="call-modal" class="modal hidden">
+            <div class="modal-content">
+                <h3>Incoming Call</h3>
+                <p><span id="caller-name">Someone</span> is calling you.</p>
+                <div class="modal-actions">
+                    <button id="accept-call-btn" class="btn" style="background: var(--success); color: white;">Accept</button>
+                    <button id="decline-call-btn" class="btn" style="background: var(--error); color: white;">Decline</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="/static/js/webrtc.js"></script>
+    <script src="/static/js/app.js"></script>
+</body>
+</html>
