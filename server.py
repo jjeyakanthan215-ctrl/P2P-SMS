@@ -10,7 +10,6 @@ import os
 from discovery import MDNSService
 from security import generate_qr_base64
 from database import create_user, verify_user, get_total_users, get_all_users
-import os
 
 logger = logging.getLogger(__name__)
 
@@ -33,7 +32,11 @@ class AuthData(BaseModel):
 
 class HostStart(BaseModel):
     username: str
+    space_name: str
     pin: str
+
+class HostStop(BaseModel):
+    space_name: str
 
 @app.on_event("startup")
 async def startup_event():
@@ -60,15 +63,15 @@ async def register_user(data: AuthData):
 
 @app.post("/api/auth/login")
 async def login_user(data: AuthData):
-    if verify_user(data.username, data.password):
-        role = "admin" if data.username == "TUf_Jerry" else "user"
+    role = verify_user(data.username, data.password)
+    if role:
         return {"status": "success", "role": role}
     return {"status": "error", "message": "Invalid credentials"}
 
 @app.get("/api/admin/stats")
 async def get_admin_stats(username: str = None):
     # Basic security check
-    if username != "TUf_Jerry":
+    if username != "HABIB_Admin":
         return {"status": "error", "message": "Unauthorized"}
         
     total_users = get_total_users()
@@ -98,22 +101,26 @@ async def get_admin_stats(username: str = None):
 async def start_hosting(data: HostStart):
     global mdns_service
     
+    if data.space_name in rooms:
+        return {"status": "error", "message": "Space name already in use"}
+        
     # Initialize room
-    rooms[data.username] = {
+    rooms[data.space_name] = {
         'pin': data.pin,
+        'host_username': data.username,
         'clients': {}
     }
     
     # Try mDNS for local network discovery (may fail on cloud, that's OK)
     try:
         if mdns_service is None:
-            port = int(os.environ.get("PORT", 8005))
+            port = int(os.environ.get("PORT", 8006))
             mdns_service = MDNSService(port=port)
             mdns_service.start()
         connect_url = f"http://{mdns_service.ip}:{mdns_service.port}"
     except Exception:
         # On cloud deployments mDNS is not available — use the request origin instead
-        connect_url = os.environ.get("RENDER_EXTERNAL_URL", "http://localhost:8005")
+        connect_url = os.environ.get("RENDER_EXTERNAL_URL", "http://localhost:8006")
     
     qr_base64 = generate_qr_base64(connect_url)
     
@@ -122,6 +129,21 @@ async def start_hosting(data: HostStart):
         "qr_code": qr_base64,
         "server_ip": connect_url
     }
+
+@app.post("/api/host/stop")
+async def stop_hosting(data: HostStop):
+    if data.space_name in rooms:
+        # Optionally notify connected clients
+        for conn in rooms[data.space_name]['clients'].values():
+            try:
+                await conn.send_text(json.dumps({
+                    "type": "host_disconnected"
+                }))
+            except:
+                pass
+        del rooms[data.space_name]
+    return {"status": "success"}
+
 
 @app.websocket("/ws/{client_id}")
 async def websocket_endpoint(websocket: WebSocket, client_id: str):
@@ -140,17 +162,27 @@ async def websocket_endpoint(websocket: WebSocket, client_id: str):
                 provided_pin = message.get("data", {}).get("pin")
                 client_username = message.get("data", {}).get("username")
                 
-                if host_username in rooms and rooms[host_username]['pin'] == provided_pin:
+                if host_username not in rooms:
+                    await websocket.send_text(json.dumps({"type": "auth_fail"}))
+                    continue
+                
+                room = rooms[host_username]
+                is_host = (client_username == room['host_username'])
+                pin_ok = (room['pin'] == provided_pin) or (room['pin'] == '' and provided_pin == '')
+                
+                # Host authenticates into their own room; joiners must supply correct PIN
+                if is_host or pin_ok:
                     current_room = host_username
-                    rooms[current_room]['clients'][client_id] = websocket
+                    room['clients'][client_id] = websocket
                     
                     await websocket.send_text(json.dumps({
-                        "type": "auth_success", 
-                        "host_username": host_username
+                        "type": "auth_success",
+                        "host_username": room['host_username'],
+                        "space_name": host_username
                     }))
                     
-                    # Notify others in the room
-                    for cid, conn in list(rooms[current_room]['clients'].items()):
+                    # Notify other peers in the room that someone joined
+                    for cid, conn in list(room['clients'].items()):
                         if cid != client_id:
                             try:
                                 await conn.send_text(json.dumps({
@@ -164,7 +196,7 @@ async def websocket_endpoint(websocket: WebSocket, client_id: str):
                     
             elif message.get("type") == "admin_auth":
                 provided_pwd = message.get("data", {}).get("password")
-                if provided_pwd == "Jerry@215":
+                if provided_pwd == "Habib@215":
                     admin_connections[client_id] = websocket
                     await websocket.send_text(json.dumps({"type": "admin_auth_success"}))
                 else:

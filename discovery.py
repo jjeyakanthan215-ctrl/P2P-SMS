@@ -1,60 +1,71 @@
-import socket
 import logging
-from zeroconf import ServiceInfo, Zeroconf
-import time
-import uuid
 
 logger = logging.getLogger(__name__)
 
 class MDNSService:
+    """
+    mDNS/Zeroconf local network discovery.
+    On cloud environments (like Render), this is a no-op stub
+    since mDNS only works on local networks.
+    """
+
     def __init__(self, port, name="P2PSMS"):
-        self.zeroconf = Zeroconf()
         self.port = port
         self.name = name
-        self.service_info = None
-        self.ip = self._get_local_ip()
+        self._enabled = False
+
+        try:
+            import socket
+            from zeroconf import ServiceInfo, Zeroconf
+            import uuid
+
+            self._zeroconf = Zeroconf()
+            self._uuid = uuid
+            self._socket = socket
+            self._ServiceInfo = ServiceInfo
+            self._enabled = True
+            self.ip = self._get_local_ip()
+            self.service_info = None
+        except Exception as e:
+            logger.warning(f"mDNS disabled (cloud/unsupported environment): {e}")
 
     def _get_local_ip(self):
-        """Get the local IP address of this machine."""
+        import socket
         s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         try:
-            # doesn't even have to be reachable
             s.connect(('10.255.255.255', 1))
-            IP = s.getsockname()[0]
+            return s.getsockname()[0]
         except Exception:
-            IP = '127.0.0.1'
+            return '127.0.0.1'
         finally:
             s.close()
-        return IP
 
     def start(self):
-        """Register the mDNS service on the local network."""
-        desc = {'path': '/'}
-        
-        # Unique instance name to avoid collisions
-        instance_name = f"{self.name}_{str(uuid.uuid4())[:8]}._http._tcp.local."
-        
-        self.service_info = ServiceInfo(
-            "_http._tcp.local.",
-            instance_name,
-            addresses=[socket.inet_aton(self.ip)],
-            port=self.port,
-            properties=desc,
-            server=f"{self.name}.local."
-        )
-
+        if not self._enabled:
+            return
         try:
-            self.zeroconf.register_service(self.service_info)
-            logger.info(f"Registered mDNS service {instance_name} at {self.ip}:{self.port}")
+            desc = {'path': '/'}
+            instance_name = f"{self.name}_{str(self._uuid.uuid4())[:8]}._http._tcp.local."
+            self.service_info = self._ServiceInfo(
+                "_http._tcp.local.",
+                instance_name,
+                addresses=[self._socket.inet_aton(self.ip)],
+                port=self.port,
+                properties=desc,
+                server=f"{self.name}.local."
+            )
+            self._zeroconf.register_service(self.service_info)
+            logger.info(f"mDNS registered: {instance_name} at {self.ip}:{self.port}")
         except Exception as e:
-            logger.error(f"Failed to register mDNS service: {e}")
+            logger.error(f"mDNS registration failed: {e}")
 
     def stop(self):
-        """Unregister the mDNS service."""
-        if self.service_info:
-            try:
-                self.zeroconf.unregister_service(self.service_info)
-            except Exception:
-                pass
-        self.zeroconf.close()
+        if not self._enabled:
+            return
+        try:
+            if self.service_info:
+                self._zeroconf.unregister_service(self.service_info)
+            self._zeroconf.close()
+        except Exception:
+            pass
         logger.info("mDNS service stopped.")

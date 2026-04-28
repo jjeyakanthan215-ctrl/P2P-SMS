@@ -9,11 +9,26 @@ class P2PConnection {
         this.onTrack = onTrack;
         this.onCallSignal = onCallSignal; // function(type, senderName)
         
-        // STUN servers for WebRTC
+        // ICE servers: STUN for discovery, TURN as relay fallback (required behind NAT/firewalls)
         this.configuration = {
-            'iceServers': [
-                {'urls': 'stun:stun.l.google.com:19302'},
-                {'urls': 'stun:stun1.l.google.com:19302'}
+            iceServers: [
+                { urls: 'stun:stun.l.google.com:19302' },
+                { urls: 'stun:stun1.l.google.com:19302' },
+                {
+                    urls: 'turn:openrelay.metered.ca:80',
+                    username: 'openrelayproject',
+                    credential: 'openrelayproject'
+                },
+                {
+                    urls: 'turn:openrelay.metered.ca:443',
+                    username: 'openrelayproject',
+                    credential: 'openrelayproject'
+                },
+                {
+                    urls: 'turn:openrelay.metered.ca:443?transport=tcp',
+                    username: 'openrelayproject',
+                    credential: 'openrelayproject'
+                }
             ]
         };
     }
@@ -24,13 +39,14 @@ class P2PConnection {
 
     connectSignaling(serverIp, pin, myUsername, hostUsername) {
         const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-        const host = serverIp ? `${serverIp}:8005` : window.location.host;
+        const host = window.location.host;
         const wsUrl = `${protocol}//${host}/ws/${this.clientId}`;
         
         this.ws = new WebSocket(wsUrl);
 
         this.ws.onopen = () => {
             console.log("Signaling connected");
+            // Both host and joiner send auth — host authenticates into their own room
             this.sendSignalingMessage('auth', { pin: pin, username: myUsername, host_username: hostUsername });
         };
 
@@ -44,8 +60,8 @@ class P2PConnection {
                         this.peerName = message.host_username;
                     }
                     this.initializePeerConnection();
-                    // If we are joining, initiate the offer
-                    // Host waits for offers, clients create offers
+                    // Only the JOINER (not the host) sends the WebRTC offer
+                    // The host is myUsername === hostUsername, so they wait
                     if (myUsername !== hostUsername) {
                         this.createOffer();
                     }
@@ -120,8 +136,12 @@ class P2PConnection {
         };
 
         this.peerConnection.onconnectionstatechange = () => {
-            console.log("Connection state:", this.peerConnection.connectionState);
-            this.onConnectionStateChange(this.peerConnection.connectionState);
+            const state = this.peerConnection.connectionState;
+            console.log("Connection state:", state);
+            // Only propagate terminal states to avoid spurious 'disconnected' flashes
+            if (state === 'connected' || state === 'failed' || state === 'closed') {
+                this.onConnectionStateChange(state === 'connected' ? 'connected' : 'disconnected');
+            }
         };
 
         // Create Data Channel
@@ -177,12 +197,11 @@ class P2PConnection {
         }
     }
 
-    sendFileMetadata(file) {
+    sendFileMetadata(fileMeta) {
+        // Pass ALL fields through (name, size, fileType, vanish, id, etc.)
         this.send({
             type: 'file_meta',
-            name: file.name,
-            size: file.size,
-            fileType: file.type
+            ...fileMeta
         });
     }
 
@@ -208,5 +227,40 @@ class P2PConnection {
             track.stop();
         });
         await this.createOffer();
+    }
+
+    // ── Video Call ──
+    async startVideo(stream) {
+        if (!this.peerConnection) return;
+        // Remove any existing tracks first
+        this.peerConnection.getSenders().forEach(sender => {
+            this.peerConnection.removeTrack(sender);
+        });
+        stream.getTracks().forEach(track => {
+            this.peerConnection.addTrack(track, stream);
+        });
+        await this.createOffer();
+    }
+
+    stopVideo() {
+        if (!this.peerConnection) return;
+        this.peerConnection.getSenders().forEach(sender => {
+            if (sender.track) sender.track.stop();
+            this.peerConnection.removeTrack(sender);
+        });
+    }
+
+    async replaceVideoTrack(newTrack) {
+        if (!this.peerConnection) return;
+        
+        const senders = this.peerConnection.getSenders();
+        const videoSender = senders.find(sender => sender.track && sender.track.kind === 'video');
+        
+        if (videoSender) {
+            await videoSender.replaceTrack(newTrack);
+        } else {
+            this.peerConnection.addTrack(newTrack);
+            await this.createOffer();
+        }
     }
 }

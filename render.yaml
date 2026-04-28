@@ -1,9 +1,17 @@
 services:
   - type: web
-    name: jerry-drop
+    name: habib-text
     env: python
+    region: singapore   # Change to 'oregon' or 'frankfurt' if closer to your users
+    plan: free
     buildCommand: pip install -r requirements.txt
-    startCommand: uvicorn server:app --host 0.0.0.0 --port $PORT
+    startCommand: uvicorn server:app --host 0.0.0.0 --port $PORT --workers 1
     envVars:
       - key: PYTHON_VERSION
-        value: 3.11.0
+        value: "3.11.0"
+      - key: DB_PATH
+        value: /data/users.db   # Persistent disk path
+    disk:
+      name: habib-text-db
+      mountPath: /data
+      sizeGB: 1
